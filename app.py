@@ -6,6 +6,7 @@ import numpy as np
 import tempfile
 import pandas as pd
 import matplotlib.pyplot as plt
+import os
 
 # ----------------- PAGE CONFIG -----------------
 st.set_page_config(
@@ -19,8 +20,17 @@ st.set_page_config(
 st.sidebar.title("Settings")
 dark_mode = st.sidebar.checkbox("Dark Mode", value=False)
 confidence_threshold = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
-webcam_mode = st.sidebar.checkbox("Use Webcam / Live Mode", value=False)
 multi_image_mode = st.sidebar.checkbox("Upload Multiple Images", value=False)
+
+# Determine if running on Streamlit Cloud
+on_cloud = "STREAMLIT_SERVER_PORT" in os.environ
+
+# Webcam toggle (disabled on Cloud)
+if not on_cloud:
+    webcam_mode = st.sidebar.checkbox("Use Webcam / Live Mode", value=False)
+else:
+    webcam_mode = False
+    st.sidebar.info("Webcam mode disabled on Streamlit Cloud")
 
 # ----------------- DARK/LIGHT THEME -----------------
 if dark_mode:
@@ -52,7 +62,7 @@ st.markdown(
     f"""
     <div style='padding:20px; border-radius:15px; text-align:center; background-color:#4A90E2; color:white;'>
         <h1>Real-Time Object Detection</h1>
-        <p>Upload images or use webcam to detect objects using YOLOv8</p>
+        <p>Upload images or use webcam (local only) to detect objects using YOLOv8</p>
     </div>
     """, unsafe_allow_html=True
 )
@@ -67,9 +77,8 @@ model = load_model()
 
 # ----------------- IMAGE / WEBCAM INPUT -----------------
 uploaded_files = []
+
 if webcam_mode:
-    st.warning("Webcam mode is currently for live feed only. Ensure your webcam is accessible.")
-    # Webcam feature requires st.camera_input
     frame = st.camera_input("Capture from Webcam")
     if frame:
         uploaded_files = [frame]
@@ -98,7 +107,7 @@ for uploaded_file in uploaded_files:
     # Get unique classes
     classes_detected = [model.names[int(r.cls[0])] for r in filtered_boxes]
     unique_classes = list(set(classes_detected))
-    selected_classes = st.sidebar.multiselect(f"Select Classes to Display ({uploaded_file.name})", unique_classes, default=unique_classes)
+    selected_classes = st.sidebar.multiselect(f"Select Classes ({uploaded_file.name})", unique_classes, default=unique_classes)
 
     # Bounding box colors per class
     class_colors = {cls: tuple(np.random.randint(0,255,3).tolist()) for cls in unique_classes}
