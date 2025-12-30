@@ -22,10 +22,10 @@ dark_mode = st.sidebar.checkbox("Dark Mode", value=False)
 confidence_threshold = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
 multi_image_mode = st.sidebar.checkbox("Upload Multiple Images", value=False)
 
-# Determine if running on Streamlit Cloud
+# Detect Streamlit Cloud
 on_cloud = "STREAMLIT_SERVER_PORT" in os.environ
 
-# Webcam toggle (disabled on Cloud)
+# Webcam toggle only locally
 if not on_cloud:
     webcam_mode = st.sidebar.checkbox("Use Webcam / Live Mode", value=False)
 else:
@@ -33,12 +33,8 @@ else:
     st.sidebar.info("Webcam mode disabled on Streamlit Cloud")
 
 # ----------------- DARK/LIGHT THEME -----------------
-if dark_mode:
-    bg_color = "#121212"
-    text_color = "#ffffff"
-else:
-    bg_color = "#f5f5f5"
-    text_color = "#000000"
+bg_color = "#121212" if dark_mode else "#f5f5f5"
+text_color = "#ffffff" if dark_mode else "#000000"
 
 st.markdown(
     f"""
@@ -69,11 +65,8 @@ st.markdown(
 st.write("")
 
 # ----------------- LOAD MODEL -----------------
-@st.cache_resource
-def load_model(model_name="yolov8n.pt"):
-    return YOLO(model_name)
-
-model = load_model()
+# Direct load to avoid cache issues on Cloud
+model = YOLO("yolov8n.pt")
 
 # ----------------- IMAGE / WEBCAM INPUT -----------------
 uploaded_files = []
@@ -91,7 +84,6 @@ else:
 
 # ----------------- PROCESS EACH IMAGE -----------------
 for uploaded_file in uploaded_files:
-    # Load image and convert to RGB
     image = Image.open(uploaded_file)
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -104,15 +96,15 @@ for uploaded_file in uploaded_files:
     # Filter by confidence
     filtered_boxes = [r for r in results.boxes if r.conf[0] >= confidence_threshold]
 
-    # Get unique classes
+    # Unique classes
     classes_detected = [model.names[int(r.cls[0])] for r in filtered_boxes]
     unique_classes = list(set(classes_detected))
     selected_classes = st.sidebar.multiselect(f"Select Classes ({uploaded_file.name})", unique_classes, default=unique_classes)
 
-    # Bounding box colors per class
+    # Bounding box colors
     class_colors = {cls: tuple(np.random.randint(0,255,3).tolist()) for cls in unique_classes}
 
-    # Draw bounding boxes
+    # Draw boxes
     for r in filtered_boxes:
         cls_name = model.names[int(r.cls[0])]
         if cls_name not in selected_classes:
@@ -124,29 +116,28 @@ for uploaded_file in uploaded_files:
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    # Display image
     st.image(frame, caption=f"Detected Objects - {uploaded_file.name}", channels="BGR")
 
-    # ----------------- METRICS -----------------
+    # Metrics
     cols = st.columns(3)
     cols[0].metric("Total Objects", len(filtered_boxes))
     cols[1].metric("Unique Classes", len(unique_classes))
     avg_conf = np.mean([r.conf[0] for r in filtered_boxes]) if filtered_boxes else 0
     cols[2].metric("Average Confidence", f"{avg_conf:.2f}")
 
-    # ----------------- BAR CHART -----------------
+    # Bar chart
     if filtered_boxes:
         class_counts = pd.Series([model.names[int(r.cls[0])] for r in filtered_boxes]).value_counts()
         st.bar_chart(class_counts)
 
-    # ----------------- PIE CHART -----------------
+    # Pie chart
     if filtered_boxes:
         fig, ax = plt.subplots()
         class_counts.plot.pie(autopct='%1.1f%%', ax=ax)
         ax.set_ylabel("")
         st.pyplot(fig)
 
-    # ----------------- DOWNLOAD PROCESSED IMAGE -----------------
+    # Download image
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
         cv2.imwrite(tmp_file.name, frame)
         st.download_button(
@@ -156,34 +147,29 @@ for uploaded_file in uploaded_files:
             mime="image/png"
         )
 
-    # ----------------- DOWNLOAD CSV -----------------
+    # Download CSV
     if filtered_boxes:
-        data = []
-        for r in filtered_boxes:
-            cls_name = model.names[int(r.cls[0])]
-            x1, y1, x2, y2 = map(int, r.xyxy[0])
-            conf = float(r.conf[0])
-            data.append({"class": cls_name, "confidence": conf, "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        data = [{"class": model.names[int(r.cls[0])], "confidence": float(r.conf[0]),
+                 "x1": int(r.xyxy[0][0]), "y1": int(r.xyxy[0][1]),
+                 "x2": int(r.xyxy[0][2]), "y2": int(r.xyxy[0][3])} for r in filtered_boxes]
         df = pd.DataFrame(data)
-        csv = df.to_csv(index=False)
         st.download_button(
             label="Download Detection CSV",
-            data=csv,
+            data=df.to_csv(index=False),
             file_name=f"detections_{uploaded_file.name}.csv",
             mime="text/csv"
         )
 
-    # ----------------- DOWNLOAD JSON -----------------
+    # Download JSON
     if filtered_boxes:
-        json_data = df.to_json(orient="records")
         st.download_button(
             label="Download Detection JSON",
-            data=json_data,
+            data=df.to_json(orient="records"),
             file_name=f"detections_{uploaded_file.name}.json",
             mime="application/json"
         )
 
-# ----------------- FOOTER -----------------
+# Footer
 st.markdown("---")
 st.markdown(
     f"<p style='text-align:center; color:{text_color};'>Created by <b>sherinovia19</b> | Powered by YOLOv8 & Streamlit</p>",
