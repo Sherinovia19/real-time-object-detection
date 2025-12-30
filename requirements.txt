@@ -1,9 +1,11 @@
 streamlit==1.27.0
 ultralytics==8.3.3
-opencv-python==4.6.0.66
+opencv-python-headless==4.6.0.66
 Pillow==10.0.0
 numpy==1.26.0
 pandas==2.1.1
 matplotlib==3.8.0
-torch>=2.1.0,<2.2.0
+torch==2.1.0+cpu
+
+
 
