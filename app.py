@@ -10,54 +10,87 @@ import matplotlib.pyplot as plt
 # ----------------- PAGE CONFIG -----------------
 st.set_page_config(
     page_title="Real-Time Object Detection",
-    page_icon="🖼️",
+    page_icon="🖥️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ----------------- CUSTOM CSS / BACKGROUND -----------------
+# ----------------- SIDEBAR -----------------
+st.sidebar.title("Settings")
+dark_mode = st.sidebar.checkbox("Dark Mode", value=False)
+confidence_threshold = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
+webcam_mode = st.sidebar.checkbox("Use Webcam / Live Mode", value=False)
+multi_image_mode = st.sidebar.checkbox("Upload Multiple Images", value=False)
+
+# ----------------- DARK/LIGHT THEME -----------------
+if dark_mode:
+    bg_color = "#121212"
+    text_color = "#ffffff"
+else:
+    bg_color = "#f5f5f5"
+    text_color = "#000000"
+
 st.markdown(
-    """
+    f"""
     <style>
-    body {
-        background: linear-gradient(to right, #e0f7fa, #ffffff);
+    body {{
+        background-color: {bg_color};
+        color: {text_color};
         font-family: 'Arial', sans-serif;
-    }
-    .stButton>button {
+    }}
+    .stButton>button {{
         background-color: #4A90E2;
         color: white;
         border-radius:10px;
-    }
+    }}
     </style>
     """, unsafe_allow_html=True
 )
 
 # ----------------- HEADER -----------------
 st.markdown(
-    """
+    f"""
     <div style='padding:20px; border-radius:15px; text-align:center; background-color:#4A90E2; color:white;'>
-        <h1>🖼️ Real-Time Object Detection</h1>
-        <p>Upload an image and detect objects using YOLOv8</p>
+        <h1>Real-Time Object Detection</h1>
+        <p>Upload images or use webcam to detect objects using YOLOv8</p>
     </div>
     """, unsafe_allow_html=True
 )
-
 st.write("")
 
-# ----------------- SIDEBAR -----------------
-st.sidebar.title("Settings")
-confidence_threshold = st.sidebar.slider("Confidence Threshold", 0.1, 1.0, 0.25, 0.05)
+# ----------------- LOAD MODEL -----------------
+@st.cache_resource
+def load_model(model_name="yolov8n.pt"):
+    return YOLO(model_name)
 
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
+model = load_model()
 
-if uploaded_file is not None:
-    # Load image
+# ----------------- IMAGE / WEBCAM INPUT -----------------
+uploaded_files = []
+if webcam_mode:
+    st.warning("Webcam mode is currently for live feed only. Ensure your webcam is accessible.")
+    # Webcam feature requires st.camera_input
+    frame = st.camera_input("Capture from Webcam")
+    if frame:
+        uploaded_files = [frame]
+elif multi_image_mode:
+    uploaded_files = st.file_uploader("Upload Images", type=["jpg","jpeg","png"], accept_multiple_files=True)
+else:
+    file = st.file_uploader("Upload an Image", type=["jpg","jpeg","png"])
+    if file:
+        uploaded_files = [file]
+
+# ----------------- PROCESS EACH IMAGE -----------------
+for uploaded_file in uploaded_files:
+    # Load image and convert to RGB
     image = Image.open(uploaded_file)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
     frame = np.array(image)
 
-    # Load model
-    model = YOLO("yolov8n.pt")
-    results = model(frame)[0]
+    # Run YOLOv8
+    with st.spinner("Processing..."):
+        results = model(frame)[0]
 
     # Filter by confidence
     filtered_boxes = [r for r in results.boxes if r.conf[0] >= confidence_threshold]
@@ -65,9 +98,9 @@ if uploaded_file is not None:
     # Get unique classes
     classes_detected = [model.names[int(r.cls[0])] for r in filtered_boxes]
     unique_classes = list(set(classes_detected))
-    selected_classes = st.sidebar.multiselect("Select Classes to Display", unique_classes, default=unique_classes)
+    selected_classes = st.sidebar.multiselect(f"Select Classes to Display ({uploaded_file.name})", unique_classes, default=unique_classes)
 
-    # Bounding box colors
+    # Bounding box colors per class
     class_colors = {cls: tuple(np.random.randint(0,255,3).tolist()) for cls in unique_classes}
 
     # Draw bounding boxes
@@ -83,7 +116,7 @@ if uploaded_file is not None:
         cv2.putText(frame, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
     # Display image
-    st.image(frame, caption="Detected Objects", channels="BGR")
+    st.image(frame, caption=f"Detected Objects - {uploaded_file.name}", channels="BGR")
 
     # ----------------- METRICS -----------------
     cols = st.columns(3)
@@ -97,20 +130,53 @@ if uploaded_file is not None:
         class_counts = pd.Series([model.names[int(r.cls[0])] for r in filtered_boxes]).value_counts()
         st.bar_chart(class_counts)
 
-    # ----------------- DOWNLOAD BUTTON -----------------
+    # ----------------- PIE CHART -----------------
+    if filtered_boxes:
+        fig, ax = plt.subplots()
+        class_counts.plot.pie(autopct='%1.1f%%', ax=ax)
+        ax.set_ylabel("")
+        st.pyplot(fig)
+
+    # ----------------- DOWNLOAD PROCESSED IMAGE -----------------
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
         cv2.imwrite(tmp_file.name, frame)
         st.download_button(
             label="Download Processed Image",
             data=open(tmp_file.name, "rb").read(),
-            file_name="detected_image.png",
+            file_name=f"detected_{uploaded_file.name}",
             mime="image/png"
+        )
+
+    # ----------------- DOWNLOAD CSV -----------------
+    if filtered_boxes:
+        data = []
+        for r in filtered_boxes:
+            cls_name = model.names[int(r.cls[0])]
+            x1, y1, x2, y2 = map(int, r.xyxy[0])
+            conf = float(r.conf[0])
+            data.append({"class": cls_name, "confidence": conf, "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        df = pd.DataFrame(data)
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="Download Detection CSV",
+            data=csv,
+            file_name=f"detections_{uploaded_file.name}.csv",
+            mime="text/csv"
+        )
+
+    # ----------------- DOWNLOAD JSON -----------------
+    if filtered_boxes:
+        json_data = df.to_json(orient="records")
+        st.download_button(
+            label="Download Detection JSON",
+            data=json_data,
+            file_name=f"detections_{uploaded_file.name}.json",
+            mime="application/json"
         )
 
 # ----------------- FOOTER -----------------
 st.markdown("---")
 st.markdown(
-    "<p style='text-align:center;'>Created by <b>sherinovia19</b> | Powered by YOLOv8 & Streamlit</p>",
+    f"<p style='text-align:center; color:{text_color};'>Created by <b>sherinovia19</b> | Powered by YOLOv8 & Streamlit</p>",
     unsafe_allow_html=True
 )
-
