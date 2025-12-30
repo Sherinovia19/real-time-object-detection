@@ -3,3 +3,6 @@ ultralytics
 opencv-python==4.7.0.72
 Pillow
 numpy
+pandas
+matplotlib
+
