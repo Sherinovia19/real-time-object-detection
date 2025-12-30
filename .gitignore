@@ -1,0 +1,22 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.env/
+venv/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PyTorch / model files
+*.pt
+*.pth
+*.weights
